@@ -30,11 +30,15 @@ public class NKillSignatureTool {
     private static byte[] signatures;
 
     public static void main(String[] args) throws Exception {
-        process();
+        String pmsClass = null;
+        if (args.length >= 1) {
+            pmsClass = args[0];
+        }
+        process(pmsClass);
     }
 
     @SuppressWarnings("ResultOfMethodCallIgnored")
-    private static void process() throws Exception {
+    private static void process(String pmsClass) throws Exception {
         Properties properties = new Properties();
         try (FileInputStream fis = new FileInputStream("config.txt")) {
             properties.load(fis);
@@ -48,26 +52,26 @@ public class NKillSignatureTool {
         String signAlias = properties.getProperty("sign.alias");
         String signAliasPassword = properties.getProperty("sign.aliasPassword");
 
-        System.out.println("正在读取签名：" + signApk.getPath());
+        System.out.println("I: Reading signature from " + signApk.getPath() + "...");
         signatures = getApkSignatureData(signApk);
         byte[] manifestData;
         byte[] dexData;
 
-        System.out.println("\n正在读取APK：" + srcApk.getPath());
+        System.out.println("I: Reading " + srcApk.getPath() + "...");
 
         try (ZipFile zipFile = new ZipFile(srcApk)) {
-            System.out.println("  --正在处理AndroidManifest.xml");
+            System.out.println("I: Parsing AndroidManifest.xml...");
             ZipEntry manifestEntry = zipFile.getEntry("AndroidManifest.xml");
-            manifestData = parseManifest(zipFile.getInputStream(manifestEntry));
+            manifestData = parseManifest(zipFile.getInputStream(manifestEntry), pmsClass);
 
             ZipEntry dexEntry = zipFile.getEntry("classes.dex");
             DexBackedDexFile dex = DexBackedDexFile.fromInputStream(Opcodes.getDefault(),
                     new BufferedInputStream(zipFile.getInputStream(dexEntry)));
 
-            System.out.println("  --正在处理classes.dex");
-            dexData = processDex(dex);
+            System.out.println("I: Parsing classes.dex...");
+            dexData = processDex(dex, pmsClass);
 
-            System.out.println("\n正在写出APK：" + outApk.getPath());
+            System.out.println("I: Building " + outApk.getPath() + "...");
             try (ZipOutputStream zos = new ZipOutputStream(outApk)) {
                 zos.putNextEntry("AndroidManifest.xml");
                 zos.write(manifestData);
@@ -88,7 +92,7 @@ public class NKillSignatureTool {
                 }
             }
             if (signEnable) {
-                System.out.println("\n正在签名APK：" + outApk.getPath());
+                System.out.println("I: Adding signature to " + outApk.getPath() + "...");
                 KeystoreKey keystoreKey = new KeystoreKey(signFile, signPassword, signAlias, signAliasPassword);
                 File temp = new File(outApk.getPath() + ".tmp");
                 ApkSigner.signApk(outApk, temp, keystoreKey,null);
@@ -96,11 +100,11 @@ public class NKillSignatureTool {
                 temp.renameTo(outApk);
             }
 
-            System.out.println("\n处理完成");
+            System.out.println("I: Done!");
         }
     }
 
-    private static byte[] processDex(DexBackedDexFile dex) throws Exception {
+    private static byte[] processDex(DexBackedDexFile dex, String pmsClass) throws Exception {
         DexBuilder dexBuilder = new DexBuilder(Opcodes.getDefault());
         try (InputStream fis = NKillSignatureTool.class.getResourceAsStream("PmsHookApplication.smali")) {
             String src = new String(StreamUtil.readBytes(fis), "utf-8");
@@ -112,13 +116,17 @@ public class NKillSignatureTool {
                 }
                 customApplicationName = "L" + customApplicationName.replace('.', '/') + ";";
                 src = src.replace("Landroid/app/Application;", customApplicationName);
+                //由于某些开发者会检测PmsHookApplication类，故添加一个自定义接口
+                if (pmsClass != null) {
+                    src = src.replace("Lcc/binmt/signature/PmsHookApplication;", "L" + pmsClass.replace('.', '/') + ";");
+                }
             }
             if (signatures == null)
                 throw new NullPointerException("Signatures is null");
             src = src.replace("### Signatures Data ###", Base64.getEncoder().encodeToString(signatures));
             ClassDef classDef = Smali.assembleSmaliFile(src, dexBuilder, new SmaliOptions());
             if (classDef == null)
-                throw new Exception("Parse smali failed");
+                throw new Exception("E: Parse smali failed!");
             for (DexBackedClassDef dexBackedClassDef : dex.getClasses()) {
                 dexBuilder.internClassDef(dexBackedClassDef);
             }
@@ -128,7 +136,7 @@ public class NKillSignatureTool {
         return Arrays.copyOf(store.getBufferData(), store.getSize());
     }
 
-    private static byte[] parseManifest(InputStream is) throws IOException {
+    private static byte[] parseManifest(InputStream is, String pmsClass) throws IOException {
         AXmlDecoder axml = AXmlDecoder.decode(is);
         AXmlResourceParser parser = new AXmlResourceParser();
         parser.open(new ByteArrayInputStream(axml.getData()), axml.mTableStrings);
@@ -209,7 +217,12 @@ public class NKillSignatureTool {
             throw new IOException();
         ArrayList<String> list = new ArrayList<>(axml.mTableStrings.getSize());
         axml.mTableStrings.getStrings(list);
-        list.add("cc.binmt.signature.PmsHookApplication");
+        //由于某些开发者会检测PmsHookApplication类，故添加一个自定义接口
+        if (pmsClass != null) {
+            list.add(pmsClass);
+        } else {
+            list.add("cc.binmt.signature.PmsHookApplication");
+        }
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         axml.write(list, baos);
         return baos.toByteArray();
@@ -241,14 +254,14 @@ public class NKillSignatureTool {
                 dos.write(certs.length);
                 for (int i = 0; i < certs.length; i++) {
                     byte[] data = certs[i].getEncoded();
-                    System.out.printf("  --SignatureHash[%d]: %08x\n", i, Arrays.hashCode(data));
+                    System.out.printf("I: SignatureHash[%d] -> %08x\n", i, Arrays.hashCode(data));
                     dos.writeInt(data.length);
                     dos.write(data);
                 }
                 return baos.toByteArray();
             }
         }
-        throw new Exception("META-INF/XXX.RSA (DSA) file not found.");
+        throw new Exception("E: META-INF/XXX.RSA (DSA) file not found!");
     }
 
 }
