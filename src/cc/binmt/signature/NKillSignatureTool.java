@@ -111,14 +111,19 @@ public class NKillSignatureTool {
             if (customApplication) {
                 if (customApplicationName.startsWith(".")) {
                     if (packageName == null)
-                        throw new NullPointerException("Package name is null.");
+                        throw new NullPointerException("E: Package name is null.");
                     customApplicationName = packageName + customApplicationName;
                 }
                 customApplicationName = "L" + customApplicationName.replace('.', '/') + ";";
                 src = src.replace("Landroid/app/Application;", customApplicationName);
                 //由于某些开发者会检测PmsHookApplication类，故添加一个自定义接口
                 if (pmsClass != null) {
-                    src = src.replace("Lcc/binmt/signature/PmsHookApplication;", "L" + pmsClass.replace('.', '/') + ";");
+                    String sourceName = pmsClass;
+                    if (pmsClass.contains(".")) {
+                        sourceName = pmsClass.substring(pmsClass.lastIndexOf('.') + 1);
+                    }
+                    src = src.replace("Lcc/binmt/signature/PmsHookApplication;", "L" + pmsClass.replace('.', '/') + ";")
+                            .replace(".source \"PmsHookApplication.java\"", ".source" + "\"" + sourceName + ".java" + "\"");
                 }
             }
             if (signatures == null)
