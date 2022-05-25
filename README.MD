@@ -24,7 +24,7 @@
 3. 运行，三种方式
     - 用 IDEA 打开项目并运行源码。
     - Windows 系统可以直接打开 run.bat 执行。
-    - Linux 或 MacOS 系统中，打开终端，cd到项目根目录，输入 java -jar nkstool.jar 并回车。
+    - Linux 或 MacOS 系统中，打开终端，cd到项目根目录，输入 java -jar  --add-exports java.base/sun.security.pkcs=ALL-UNNAMED --add-exports java.base/sun.security.x509=ALL-UNNAMED nkstool.jar 并回车。
 4. 测试输出的 apk 文件
 
 其它
